@@ -1,3 +1,8 @@
 CMakeFiles/
 CMakeCache.txt
 .vscode/
+cmake_install.cmake
+Makefile
+kprobe
+kprobe.bpf.o
+kprobe.skel.h
