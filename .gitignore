@@ -1,8 +1,12 @@
-CMakeFiles/
-CMakeCache.txt
 .vscode/
-cmake_install.cmake
-Makefile
+
+# build artifacts
+build/CMakeFiles/
+build/CMakeCache.txt
+build/cmake_install.cmake
+build/Makefile
+build/libbpf
+build/bpftool
 kprobe
 kprobe.bpf.o
 kprobe.skel.h

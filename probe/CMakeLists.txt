@@ -1,5 +1,5 @@
-
-cmake_minimum_required(VERSION 3.22)
+# min default cmake on ubuntu:20.04 docker
+cmake_minimum_required(VERSION 3.16.3)
 
 include(ExternalProject)
 project(probe)
@@ -41,7 +41,7 @@ ExternalProject_Add(bpftool
 set(BPFOBJECT_BPFTOOL_EXE ${CMAKE_CURRENT_BINARY_DIR}/bpftool/bootstrap/bpftool)
 set(BPFOBJECT_VMLINUX_H ${CMAKE_CURRENT_SOURCE_DIR}/probe/vmlinux.h)
 set(LIBBPF_INCLUDE_DIRS ${CMAKE_CURRENT_BINARY_DIR}/libbpf)
-set(LIBBPF_LIBRARIES ${CMAKE_CURRENT_BINARY_DIR}/libbpf/src/libbpf.a)
+set(LIBBPF_LIBRARIES ${CMAKE_CURRENT_BINARY_DIR}/libbpf/libbpf.a)
 find_package(BpfObject REQUIRED)
 
 bpf_object(kprobe kprobe.bpf.c)

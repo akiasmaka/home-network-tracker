@@ -9,6 +9,9 @@ function fail() {
     exit 1
 }
 
+BUILD_PROBE=0
+GENERATE_CMAKE=0
+
 while [[ $# -ge 1 ]]
 do
     case $1 in
@@ -16,14 +19,31 @@ do
             shift
             build_image
             ;;
+        --generate-cmake)
+            shift
+            GENERATE_CMAKE=1
+            ;;
+        --build-probe)
+            shift
+            BUILD_PROBE=1
+            ;;
         *)
             fail "unknown build argument"
             ;;
     esac
 done
 
-docker run -it --rm -w $(pwd)/libbpf/src \
+if [[ $GENERATE_CMAKE ]] 
+then
+    docker run -it --rm -w $(pwd)/build \
         -v $(pwd):$(pwd) \
-        builder /bin/bash -c  NO_PKG_CONFIG=1 make 
+        builder cmake ../probe
+fi
 
+if [[ $BUILD_PROBE ]] 
+then
+    docker run -it --rm -w $(pwd)/build \
+        -v $(pwd):$(pwd) \
+        builder make
+fi
     
