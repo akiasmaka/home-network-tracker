@@ -11,10 +11,18 @@ function fail() {
 
 BUILD_PROBE=0
 GENERATE_CMAKE=0
+BUILD_LOADER=0
 
 while [[ $# -ge 1 ]]
 do
     case $1 in
+        --all)
+            shift
+            GENERATE_CMAKE=1
+            BUILD_PROBE=1
+            BUILD_LOADER=1
+            build_image
+            ;;
         --rebuild-image)
             shift
             build_image
@@ -26,6 +34,10 @@ do
         --build-probe)
             shift
             BUILD_PROBE=1
+            ;;
+        --build-loader)
+            shift
+            BUILD_LOADER=1
             ;;
         *)
             fail "unknown build argument"
@@ -53,3 +65,11 @@ else
     echo "Skipping probe build"
 fi
     
+if (( $BUILD_LOADER  == 1 ))
+then
+    docker run -it --rm -w $WORKDIR/go-loader \
+        -v $WORKDIR:$WORKDIR \
+        builder make
+else
+    echo "Skipping loader build"
+fi
