@@ -1,0 +1,5 @@
+# github.com/aquasecurity/libbpfgo v0.4.7-libbpf-1.2.0-b2e29a1
+## explicit; go 1.18
+github.com/aquasecurity/libbpfgo
+# github.com/aquasecurity/libbpfgo/helpers v0.4.5
+## explicit; go 1.18
