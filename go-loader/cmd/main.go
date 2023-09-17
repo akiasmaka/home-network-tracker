@@ -12,7 +12,7 @@ import (
 	bpf "github.com/aquasecurity/libbpfgo"
 )
 
-func main() {
+func run() int {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan bool, 1)
@@ -27,32 +27,33 @@ func main() {
 	bpfModule, err := bpf.NewModuleFromFile("../build/kprobe.bpf.o")
 	if err != nil {
 		fmt.Println(err)
-		os.Exit(1)
+		return 1
 	}
 	err = bpfModule.BPFLoadObject()
 	if err != nil {
 		fmt.Println(err)
-		os.Exit(1)
+		return 1
 	}
+	defer bpfModule.Close()
 
 	prog, err := bpfModule.GetProgram("do_unlinkat")
 	if err != nil {
 		fmt.Println(err)
-		os.Exit(1)
+		return 1
 	}
 
-	funcName := "do_unlinkat"
-	_, err = prog.AttachKprobe(funcName)
+	_, err = prog.AttachKprobe("do_unlinkat")
 	if err != nil {
 		fmt.Println(err)
-		os.Exit(1)
+		return 1
 	}
+	defer prog.GetModule().Close()
 
 	eventsChannel := make(chan []byte)
 	rb, err := bpfModule.InitRingBuf("rb", eventsChannel)
 	if err != nil {
 		fmt.Println(err)
-		os.Exit(1)
+		return 1
 	}
 
 	rb.Poll(300)
@@ -67,4 +68,8 @@ func main() {
 			os.Exit(0)
 		}
 	}
+}
+
+func main() {
+	os.Exit(run())
 }
