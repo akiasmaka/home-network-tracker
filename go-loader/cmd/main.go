@@ -1,7 +1,5 @@
 package main
 
-import "C"
-
 import (
 	"encoding/binary"
 	"fmt"
@@ -24,7 +22,7 @@ func run() int {
 		done <- true
 	}()
 
-	bpfModule, err := bpf.NewModuleFromFile("../build/kprobe.bpf.o")
+	bpfModule, err := bpf.NewModuleFromFile("build/kprobe.bpf.o")
 	if err != nil {
 		fmt.Println(err)
 		return 1
