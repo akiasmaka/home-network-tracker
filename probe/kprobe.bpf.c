@@ -7,6 +7,16 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+struct {
+  __uint(type, BPF_MAP_TYPE_RINGBUF);
+  __uint(max_entries, 1024);
+} rb SEC(".maps");
+
+struct event {
+  int pid;
+  const char *filename;
+};
+
 SEC("kprobe/do_unlinkat")
 int BPF_KPROBE(do_unlinkat, int dfd, struct filename *name) {
   pid_t pid;
@@ -14,7 +24,14 @@ int BPF_KPROBE(do_unlinkat, int dfd, struct filename *name) {
 
   pid = bpf_get_current_pid_tgid() >> 32;
   filename = BPF_CORE_READ(name, name);
-  bpf_printk("KPROBE ENTRY pid = %d, filename = %s\n", pid, filename);
+  // bpf_printk("KPROBE ENTRY pid = %d, filename = %s\n", pid, filename);
+  struct event *e;
+
+  e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+  e->pid = pid;
+  e->filename = filename;
+  bpf_ringbuf_submit(e, 0);
+
   return 0;
 }
 
@@ -23,6 +40,6 @@ int BPF_KRETPROBE(do_unlinkat_exit, long ret) {
   pid_t pid;
 
   pid = bpf_get_current_pid_tgid() >> 32;
-  bpf_printk("KPROBE EXIT: pid = %d, ret = %ld\n", pid, ret);
+  // bpf_printk("KPROBE EXIT: pid = %d, ret = %ld\n", pid, ret);
   return 0;
 }
