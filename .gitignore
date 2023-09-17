@@ -1,7 +1,8 @@
 .vscode/
 
 # build artifacts
-build/CMakeFiles/
+build/CMakeFiles
+build/.cmake
 build/CMakeCache.txt
 build/cmake_install.cmake
 build/Makefile
