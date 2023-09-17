@@ -33,17 +33,23 @@ do
     esac
 done
 
-if [[ $GENERATE_CMAKE ]] 
+WORKDIR=$(pwd)
+
+if (( $GENERATE_CMAKE  == 1 ))
 then
-    docker run -it --rm -w $(pwd)/build \
-        -v $(pwd):$(pwd) \
+    docker run -it --rm -w $WORKDIR/build \
+        -v $WORKDIR:$WORKDIR \
         builder cmake ../probe
+else
+    echo "Skipping cmake generation"
 fi
 
-if [[ $BUILD_PROBE ]] 
+if (( $BUILD_PROBE  == 1 ))
 then
-    docker run -it --rm -w $(pwd)/build \
-        -v $(pwd):$(pwd) \
+    docker run -it --rm -w $WORKDIR/build \
+        -v $WORKDIR:$WORKDIR \
         builder make
+else
+    echo "Skipping probe build"
 fi
     
