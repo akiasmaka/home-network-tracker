@@ -1,13 +1,19 @@
 .vscode/
 
-# build artifacts
+#cmake artifacts
 build/CMakeFiles
 build/.cmake
 build/CMakeCache.txt
 build/cmake_install.cmake
 build/Makefile
+build/compile_commands.json
+
+#third party build outputs
 build/libbpf
 build/bpftool
-kprobe
-kprobe.bpf.o
-kprobe.skel.h
+
+#project build outputs
+build/kprobe*
+build/xdp*
+
+go-loader/go-loader

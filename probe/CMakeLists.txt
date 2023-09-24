@@ -49,3 +49,9 @@ add_dependencies(kprobe_skel libbpf-build bpftool-build)
 
 add_executable(kprobe kprobe.c)
 target_link_libraries(kprobe kprobe_skel)
+
+bpf_object(xdp xdp.bpf.c)
+add_dependencies(xdp_skel libbpf-build bpftool-build)
+
+add_executable(xdp xdp.c)
+target_link_libraries(xdp xdp_skel)
