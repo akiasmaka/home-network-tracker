@@ -53,7 +53,7 @@ func run() int {
 		return 1
 	}
 
-	xpdRunner.AttachProbe("xdp_count_type", "enp3s0", probeRunner.KPROBE)
+	xpdRunner.AttachProbe("xdp_count_type", "enp3s0", probeRunner.XDP)
 	if err != nil {
 		fmt.Println(err)
 		return 1

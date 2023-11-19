@@ -1,11 +1,12 @@
 #include <arpa/inet.h>
+#include <linux/types.h>
 #include <bpf/bpf_helpers.h>
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
 
 char _license[] SEC("license") = "GPL";
 
-SEC("prog")
+SEC("xdp")
 int xdp_count_type(struct xdp_md *ctx) {
   void *data_end = (void *)(long)ctx->data_end;
   void *data = (void *)(long)ctx->data;
