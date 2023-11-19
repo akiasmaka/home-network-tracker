@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	probeRunner "github.com/akiasmaka/home-network-tracker/go-loader/pkg/bpf"
 	bpf "github.com/aquasecurity/libbpfgo"
 )
 
@@ -22,38 +23,49 @@ func run() int {
 		done <- true
 	}()
 
-	bpfModule, err := bpf.NewModuleFromFile("build/kprobe.bpf.o")
-	if err != nil {
-		fmt.Println(err)
-		return 1
-	}
-	err = bpfModule.BPFLoadObject()
-	if err != nil {
-		fmt.Println(err)
-		return 1
-	}
-	defer bpfModule.Close()
-
-	prog, err := bpfModule.GetProgram("do_unlinkat")
+	bpfRunner, err := probeRunner.NewRunner("build/kprobe.bpf.o")
 	if err != nil {
 		fmt.Println(err)
 		return 1
 	}
 
-	_, err = prog.AttachKprobe("do_unlinkat")
-	if err != nil {
-		fmt.Println(err)
-		return 1
-	}
-	defer prog.GetModule().Close()
-
-	eventsChannel := make(chan []byte)
-	rb, err := bpfModule.InitRingBuf("rb", eventsChannel)
+	err = bpfRunner.LoadProgram("do_unlinkat")
 	if err != nil {
 		fmt.Println(err)
 		return 1
 	}
 
+	bpfRunner.AttachProbe("do_unlinkat", "do_unlinkat", probeRunner.KPROBE)
+	if err != nil {
+		fmt.Println(err)
+		return 1
+	}
+
+	xpdRunner, err := probeRunner.NewRunner("build/xdp.bpf.o")
+	if err != nil {
+		fmt.Println(err)
+		return 1
+	}
+
+	err = xpdRunner.LoadProgram("xdp_count_type")
+	if err != nil {
+		fmt.Println(err)
+		return 1
+	}
+
+	xpdRunner.AttachProbe("xdp_count_type", "enp3s0", probeRunner.KPROBE)
+	if err != nil {
+		fmt.Println(err)
+		return 1
+	}
+	defer xpdRunner.Close()
+
+	eventsChannel, rb, err := bpfRunner.AttachRingBuffer("rb")
+
+	return listenToEvents(rb, eventsChannel, done)
+}
+
+func listenToEvents(rb *bpf.RingBuffer, eventsChannel chan []byte, done chan bool) int {
 	rb.Poll(300)
 	defer rb.Stop()
 	for {
@@ -63,7 +75,7 @@ func run() int {
 			fmt.Println("Got do_unlinkat entry process pid: ", pid)
 		case <-done:
 			fmt.Println("Exit received")
-			os.Exit(0)
+			return 0
 		}
 	}
 }
