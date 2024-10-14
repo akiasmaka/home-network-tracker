@@ -11,4 +11,4 @@ Stretch goals:
 -
 
 - Block connections based on user rules
-- mail/sms alert on suspicious connections
+- Webhook notifications?
