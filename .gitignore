@@ -16,4 +16,7 @@ build/bpftool
 build/kprobe*
 build/xdp*
 
+#go cache
+build/go-cache
+
 go-loader/go-loader

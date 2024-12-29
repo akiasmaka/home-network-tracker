@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"os"
 	"os/signal"
@@ -10,6 +9,13 @@ import (
 	probeRunner "github.com/akiasmaka/home-network-tracker/go-loader/pkg/bpf"
 	bpf "github.com/aquasecurity/libbpfgo"
 )
+
+func checkIfErrorAndExit(err error) {
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
 
 func run() int {
 	sigs := make(chan os.Signal, 1)
@@ -23,46 +29,19 @@ func run() int {
 		done <- true
 	}()
 
-	bpfRunner, err := probeRunner.NewRunner("build/kprobe.bpf.o")
-	if err != nil {
-		fmt.Println(err)
-		return 1
-	}
-
-	err = bpfRunner.LoadProgram("do_unlinkat")
-	if err != nil {
-		fmt.Println(err)
-		return 1
-	}
-
-	bpfRunner.AttachProbe("do_unlinkat", "do_unlinkat", probeRunner.KPROBE)
-	if err != nil {
-		fmt.Println(err)
-		return 1
-	}
-
 	xpdRunner, err := probeRunner.NewRunner("build/xdp.bpf.o")
-	if err != nil {
-		fmt.Println(err)
-		return 1
-	}
+	checkIfErrorAndExit(err)
 
 	err = xpdRunner.LoadProgram("xdp_count_type")
-	if err != nil {
-		fmt.Println(err)
-		return 1
-	}
+	checkIfErrorAndExit(err)
 
 	xpdRunner.AttachProbe("xdp_count_type", "enp3s0", probeRunner.XDP)
-	if err != nil {
-		fmt.Println(err)
-		return 1
-	}
+	checkIfErrorAndExit(err)
 	defer xpdRunner.Close()
 
-	eventsChannel, rb, err := bpfRunner.AttachRingBuffer("rb")
-
-	return listenToEvents(rb, eventsChannel, done)
+	// _, err := xpdRunner.GetMap("ipv4_connection_tracker")
+	// checkIfErrorAndExit(err)
+	return 0
 }
 
 func listenToEvents(rb *bpf.RingBuffer, eventsChannel chan []byte, done chan bool) int {
@@ -71,8 +50,7 @@ func listenToEvents(rb *bpf.RingBuffer, eventsChannel chan []byte, done chan boo
 	for {
 		select {
 		case eventBytes := <-eventsChannel:
-			pid := int(binary.LittleEndian.Uint32(eventBytes[0:4]))
-			fmt.Println("Got do_unlinkat entry process pid: ", pid)
+			fmt.Println(eventBytes)
 		case <-done:
 			fmt.Println("Exit received")
 			return 0

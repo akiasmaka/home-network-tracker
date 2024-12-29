@@ -69,6 +69,7 @@ if (( $BUILD_LOADER  == 1 ))
 then
     docker run -it --rm -w $WORKDIR/go-loader \
         -v $WORKDIR:$WORKDIR \
+        -v $WORKDIR/build/go-cache:/root/.cache/go-build \
         builder make
 else
     echo "Skipping loader build"

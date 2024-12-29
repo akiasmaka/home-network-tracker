@@ -68,6 +68,14 @@ func (b *bpfModuleRunner) AttachRingBuffer(ringBufferName string) (chan []byte, 
 
 }
 
+func (b *bpfModuleRunner) GetMap(mapName string) (*bpf.BPFMap, error) {
+	bpfMap, err := b.module.GetMap(mapName)
+	if err != nil {
+		return nil, err
+	}
+	return bpfMap, nil
+}
+
 func (b *bpfModuleRunner) Close() {
 	b.module.Close()
 }
