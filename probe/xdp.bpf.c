@@ -75,17 +75,17 @@ int xdp_count_type(struct xdp_md *ctx) {
             bpf_printk("Got packet to a new connection with source %pI4 and destination %pI4",
                        &iph->saddr,
                        &iph->daddr);
-
+            //TODO: should be +1 packet and +size of packet
             bpf_map_update_elem(&ipv4_connection_tracker, &new_connection, &new_stats, BPF_NOEXIST);
         } else {
             (*stats).bytes += data_end - data;
             (*stats).packets++;
 
-            // bpf_printk("Got packet to existing connection with source %pI4 and destination %pI4 this is packet number: %lu with a total %lu of bytes transferred",
-            //            &iph->saddr,
-            //            &iph->daddr,
-            //            (*stats).packets,
-            //            (*stats).bytes);
+            bpf_printk("Got packet to existing connection with source %pI4 and destination %pI4 this is packet number: %lu with a total %lu of bytes transferred",
+                       &iph->saddr,
+                       &iph->daddr,
+                       (*stats).packets,
+                       (*stats).bytes);
 
             bpf_map_update_elem(&ipv4_connection_tracker, &new_connection, stats, BPF_EXIST);
         }
