@@ -12,7 +12,9 @@ import (
 	"unsafe"
 
 	probeRunner "github.com/akiasmaka/home-network-tracker/go-loader/pkg/bpf"
+	"github.com/akiasmaka/home-network-tracker/go-loader/pkg/expiring_map"
 	bpf "github.com/aquasecurity/libbpfgo"
+	"go.uber.org/zap"
 )
 
 func checkIfErrorAndExit(err error) {
@@ -23,6 +25,8 @@ func checkIfErrorAndExit(err error) {
 }
 
 func run() int {
+	l, _ := zap.NewDevelopment()
+	l.Info("Starting up")
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan bool, 1)
@@ -45,7 +49,7 @@ func run() int {
 	defer xpdRunner.Close()
 
 	m, err := xpdRunner.GetMap("ipv4_connection_tracker")
-	printMapData(m, done)
+	printMapData(m, done, l)
 	checkIfErrorAndExit(err)
 
 	return 0
@@ -54,11 +58,6 @@ func run() int {
 type IPv4Key struct {
 	Saddr uint32
 	Daddr uint32
-}
-
-type ConnectionStats struct {
-	Packets uint64
-	Bytes   uint64
 }
 
 func IntToIPv4(ipaddr uint32) net.IP {
@@ -74,20 +73,22 @@ func parseIPv4Key(key []byte) (IPv4Key, error) {
 	return d, err
 }
 
-func parseConnectionStats(stats []byte) (ConnectionStats, error) {
-	var d ConnectionStats
+func parseConnectionStats(stats []byte) (expiring_map.ConnectionStats, error) {
+	var d expiring_map.ConnectionStats
 	r := bytes.NewReader(stats)
 	err := binary.Read(r, binary.NativeEndian, &d)
 	return d, err
 }
 
-// eventually grab all keys available, batch grab data print then delete?
-func printMapData(m *bpf.BPFMap, done chan bool) {
+// TODO: periodically query the map for new "keys" (basically new connections)
+// store the keys in a slice? then batch grab the values every x?
+// eventually remove the entries from the bpf map if they havent' been updated in a while?
+func printMapData(m *bpf.BPFMap, done chan bool, l *zap.Logger) {
 	ticker := time.NewTicker(1 * time.Second)
 	for {
 		select {
 		case <-done:
-			fmt.Println("Exit received")
+			// slog.Info("Exit received")
 			return
 		case <-ticker.C:
 			i := m.Iterator()
@@ -99,24 +100,24 @@ func printMapData(m *bpf.BPFMap, done chan bool) {
 				kPtr := unsafe.Pointer(&k[0])
 				kData, err := parseIPv4Key(k)
 				if err != nil {
-					fmt.Println("Error parsing key ", err)
+					l.Sugar().Info("Error parsing key ", err)
 					continue
 				}
-				fmt.Println("------")
-				fmt.Println(IntToIPv4(kData.Saddr).String())
+				l.Info("------")
+				l.Info(IntToIPv4(kData.Saddr).String())
 				v, err := m.GetValue(kPtr)
 				if err != nil {
-					fmt.Println("Error GetValue key ", err)
+					l.Sugar().Info("Error GetValue key ", err)
 					continue
 				}
 				s, err := parseConnectionStats(v)
 				if err != nil {
-					fmt.Println("Error parseConnectionStats key ", err)
+					// slog.Info("Error parseConnectionStats key ", err)
 					continue
 				}
-				fmt.Println("Total packets: ", s.Packets)
-				fmt.Println("Total Bytes: ", s.Bytes)
-				fmt.Println("------")
+				l.Sugar().Info("Total packets: ", s.Packets)
+				l.Sugar().Info("Total Bytes: ", s.Bytes)
+				l.Info("------")
 			}
 		}
 	}
