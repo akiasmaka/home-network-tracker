@@ -20,3 +20,4 @@ build/xdp*
 build/go-cache
 
 go-loader/go-loader
+go-loader/vendor
