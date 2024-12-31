@@ -7,17 +7,21 @@ import (
 )
 
 type IPv4Key struct {
-	Saddr uint32
-	Daddr uint32
+	Saddr uint32 `json:"saddr"`
+	Daddr uint32 `json:"daddr"`
 }
 
 type In6Addr struct {
-	Addr [16]byte
+	Addr [16]byte `json:"addr"`
 }
 
 type IPv6Key struct {
-	Saddr In6Addr
-	Daddr In6Addr
+	Saddr In6Addr `json:"saddr"`
+	Daddr In6Addr `json:"daddr"`
+}
+
+func (k IPv4Key) String() string {
+	return IntToIPv4(k.Saddr).String() + " -> " + IntToIPv4(k.Daddr).String()
 }
 
 func IntToIPv4(ipaddr uint32) net.IP {

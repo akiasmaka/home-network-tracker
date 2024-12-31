@@ -18,14 +18,16 @@ import (
 
 func checkIfErrorAndExit(err error) {
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		panic(err)
 	}
 }
 
 func run() int {
-	l, _ := zap.NewDevelopment()
-	l.Info("Starting up")
+	config := zap.NewDevelopmentConfig()
+	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+	l, err := config.Build()
+	checkIfErrorAndExit(err)
+	
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan bool, 1)
@@ -51,8 +53,8 @@ func run() int {
 	defer xpdRunner.Close()
 
 	m, err := xpdRunner.GetMap("ipv4_connection_tracker")
-	printMapData(ctx, m, done, l)
 	checkIfErrorAndExit(err)
+	innerRun(ctx, m, done, l)
 
 	return 0
 }
@@ -63,7 +65,7 @@ func run() int {
 // cleanup might not be necessary?
 // before removing store them in a ondisk database or something? or throw them in a database immediately?
 // prometheus?
-func printMapData(ctx context.Context,
+func innerRun(ctx context.Context,
 	m *bpf.BPFMap,
 	done chan bool,
 	l *zap.Logger) {
@@ -92,8 +94,8 @@ func printMapData(ctx context.Context,
 					l.Sugar().Info("Error parsing key ", err)
 					continue
 				}
-				l.Info("------")
-				l.Info(network.IntToIPv4(kData.Saddr).String())
+				l.Debug("------")
+				l.Debug(network.IntToIPv4(kData.Saddr).String())
 				v, err := m.GetValue(kPtr)
 				if err != nil {
 					l.Sugar().Error("Error GetValue key ", err)
@@ -106,9 +108,9 @@ func printMapData(ctx context.Context,
 					l.Sugar().Error("Error parseConnectionStats key ", err)
 					continue
 				}
-				l.Sugar().Info("Total packets: ", s.Packets)
-				l.Sugar().Info("Total Bytes: ", s.Bytes)
-				l.Info("------")
+				l.Sugar().Debug("Total packets: ", s.Packets)
+				l.Sugar().Debug("Total Bytes: ", s.Bytes)
+				l.Debug("------")
 				var kernelKey [64]byte
 				copy(kernelKey[:], k)
 				ct.Store(tracker.ConnectionKey{Key: kData, KernelKey: kernelKey}, s)

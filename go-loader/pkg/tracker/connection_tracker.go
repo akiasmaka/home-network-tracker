@@ -23,7 +23,7 @@ type ConnectionTracker struct {
 
 type ConnectionKey struct {
 	Key       any
-	KernelKey [64]byte // make it an array so that i can be hashable. TODO: picked 64 for now but that might not be right?
+	KernelKey [64]byte // make it an array so that it can be hashable. TODO: picked 64 for now but that might not be right?
 }
 
 type ConnectionStats struct {
@@ -70,7 +70,7 @@ func (m *ConnectionTracker) Store(key ConnectionKey, value ConnectionStats) {
 
 func (m *ConnectionTracker) Load(key ConnectionKey) (ConnectionStats, bool) {
 	if entry, exists := m.data.Load(key); exists {
-		return entry.(Entry).data, true // would be "defensive" to type assert here and in other places but w/e
+		return entry.(Entry).data, true // Consider adding type assertions for safety
 	}
 	return ConnectionStats{}, false
 }
@@ -82,10 +82,10 @@ func (m *ConnectionTracker) Monitor(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			now := time.Now().UnixMilli()
 			m.data.Range(func(key, value any) bool {
 				entry := value.(Entry)
-				m.l.Sugar().Infof("Checking key %v at time %v with lastUpdated %v", key, time.Now().UnixMilli(), entry.lastUpdated)
-				if time.Now().UnixMilli() >= entry.lastUpdated+m.expirationDuration.Milliseconds() {
+				if now >= entry.lastUpdated+m.expirationDuration.Milliseconds() {
 					m.OnExpire(key.(ConnectionKey))
 					m.data.Delete(key)
 				}
@@ -106,7 +106,7 @@ func (m *ConnectionTracker) OnExpire(key ConnectionKey) {
 			m.l.Sugar().Errorf("Failed to delete %v due to %v", key, err)
 			panic("failed to delete")
 		} else {
-			m.l.Sugar().Infof("Deleted ", key.Key)
+			m.l.Sugar().Info("Deleted ", key.Key)
 		}
 	} else {
 		m.l.Sugar().Fatalf("Kernel map not set")
