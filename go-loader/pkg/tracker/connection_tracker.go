@@ -12,28 +12,49 @@ import (
 	"go.uber.org/zap"
 )
 
+type UserSpaceMap struct {
+	sync.Map
+}
+
 type ConnectionTracker struct {
-	data               sync.Map
+	Data               UserSpaceMap
 	expirationDuration time.Duration
 	checkInterval      time.Duration
-	maxSize            int
 	kernelMap          *bpf.BPFMap
 	l                  *zap.Logger
 }
 
-type ConnectionKey struct {
-	Key       any
-	KernelKey [64]byte // make it an array so that it can be hashable. TODO: picked 64 for now but that might not be right?
+type ConnectionStats struct {
+	Bytes   uint64 `json:"bytes"`
+	Packets uint64 `json:"packets"`
 }
 
-type ConnectionStats struct {
-	Packets uint64 `json:"packets"`
-	Bytes   uint64 `json:"bytes"`
+type Connection struct {
+	ConnectionStats
+	Saddr string `json:"saddr"`
+	Daddr string `json:"addr"`
+	Type  int    `json:"type"`
 }
 
 type Entry struct {
-	data        ConnectionStats
-	lastUpdated int64
+	Connection  Connection `json:"connection"`
+	LastUpdated int64      `json:"last_updated"`
+}
+
+type ConnectionKey = [64]byte
+
+func (m *UserSpaceMap) ToSilce() []Connection {
+	var conns []Connection
+	m.Range(func(key, value any) bool {
+		switch value.(type) {
+		case Entry:
+			conns = append(conns, value.(Entry).Connection)
+		default:
+			return false
+		}
+		return true
+	})
+	return conns
 }
 
 func ParseConnectionStats(stats []byte) (ConnectionStats, error) {
@@ -46,14 +67,12 @@ func ParseConnectionStats(stats []byte) (ConnectionStats, error) {
 func NewConnectionTracker(ctx context.Context,
 	expirationDuration,
 	checkInterval time.Duration,
-	maxSize int,
 	m *bpf.BPFMap,
 	l *zap.Logger) *ConnectionTracker {
 	ct := &ConnectionTracker{
-		data:               sync.Map{},
+		Data:               UserSpaceMap{},
 		expirationDuration: expirationDuration,
 		checkInterval:      checkInterval,
-		maxSize:            maxSize,
 		kernelMap:          m,
 		l:                  l,
 	}
@@ -61,18 +80,35 @@ func NewConnectionTracker(ctx context.Context,
 	return ct
 }
 
-func (m *ConnectionTracker) Store(key ConnectionKey, value ConnectionStats) {
-	m.data.Store(key, Entry{
-		data:        value,
-		lastUpdated: time.Now().UnixMilli(),
+func (m *ConnectionTracker) Store(k ConnectionKey, v Connection) {
+	m.Data.Store(k, Entry{
+		Connection:  v,
+		LastUpdated: time.Now().UnixMilli(),
 	})
 }
 
-func (m *ConnectionTracker) Load(key ConnectionKey) (ConnectionStats, bool) {
-	if entry, exists := m.data.Load(key); exists {
-		return entry.(Entry).data, true // Consider adding type assertions for safety
+func (m *ConnectionTracker) Load(key ConnectionKey) (Connection, bool) {
+	if entry, exists := m.Data.Load(key); exists {
+		return entry.(Entry).Connection, true
 	}
-	return ConnectionStats{}, false
+	return Connection{}, false
+}
+
+func (m *ConnectionTracker) removeOldestEntry() {
+	var oldestKey ConnectionKey
+	var oldestTimestamp int64 = time.Now().UnixMilli()
+
+	m.Data.Range(func(key, value any) bool {
+		entry := value.(Entry)
+		if entry.LastUpdated < oldestTimestamp {
+			oldestTimestamp = entry.LastUpdated
+			oldestKey = key.(ConnectionKey)
+		}
+		return true
+	})
+
+	m.Data.Delete(oldestKey)
+	m.l.Sugar().Info("Removed oldest entry with timestamp: ", oldestTimestamp)
 }
 
 func (m *ConnectionTracker) Monitor(ctx context.Context) {
@@ -83,11 +119,11 @@ func (m *ConnectionTracker) Monitor(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			now := time.Now().UnixMilli()
-			m.data.Range(func(key, value any) bool {
+			m.Data.Range(func(key, value any) bool {
 				entry := value.(Entry)
-				if now >= entry.lastUpdated+m.expirationDuration.Milliseconds() {
+				if now >= entry.LastUpdated+m.expirationDuration.Milliseconds() {
 					m.OnExpire(key.(ConnectionKey))
-					m.data.Delete(key)
+					m.Data.Delete(key)
 				}
 				return true
 			})
@@ -98,15 +134,13 @@ func (m *ConnectionTracker) Monitor(ctx context.Context) {
 }
 
 func (m *ConnectionTracker) OnExpire(key ConnectionKey) {
-	m.data.Delete(key)
+	m.Data.Delete(key)
 	if m.kernelMap != nil {
-		k := key.KernelKey
+		k := key
 		kPtr := unsafe.Pointer(&k[0])
 		if err := m.kernelMap.DeleteKey(kPtr); err != nil {
 			m.l.Sugar().Errorf("Failed to delete %v due to %v", key, err)
 			panic("failed to delete")
-		} else {
-			m.l.Sugar().Info("Deleted ", key.Key)
 		}
 	} else {
 		m.l.Sugar().Fatalf("Kernel map not set")

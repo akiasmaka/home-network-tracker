@@ -11,6 +11,7 @@ import (
 
 	probeRunner "github.com/akiasmaka/home-network-tracker/go-loader/pkg/bpf"
 	"github.com/akiasmaka/home-network-tracker/go-loader/pkg/network"
+	"github.com/akiasmaka/home-network-tracker/go-loader/pkg/output"
 	"github.com/akiasmaka/home-network-tracker/go-loader/pkg/tracker"
 	bpf "github.com/aquasecurity/libbpfgo"
 	"go.uber.org/zap"
@@ -27,7 +28,7 @@ func run() int {
 	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
 	l, err := config.Build()
 	checkIfErrorAndExit(err)
-	
+
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan bool, 1)
@@ -59,12 +60,6 @@ func run() int {
 	return 0
 }
 
-// TODO/NOTES: periodically query the map for new "keys" (basically new connections)
-// store the keys in a slice? then batch grab the values every x?
-// eventually remove the entries from the bpf map & slice if they havent' been updated in a while?
-// cleanup might not be necessary?
-// before removing store them in a ondisk database or something? or throw them in a database immediately?
-// prometheus?
 func innerRun(ctx context.Context,
 	m *bpf.BPFMap,
 	done chan bool,
@@ -73,7 +68,9 @@ func innerRun(ctx context.Context,
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	ct := tracker.NewConnectionTracker(ctx, 10*time.Second, 5*time.Second, 10240, m, l)
+	ct := tracker.NewConnectionTracker(ctx, 72*time.Hour, 24*time.Hour, m, l)
+	server := output.Server{Addr: "", Port: 5000, Tracker: ct}
+	go server.Serve()
 
 	for {
 		select {
@@ -94,7 +91,6 @@ func innerRun(ctx context.Context,
 					l.Sugar().Info("Error parsing key ", err)
 					continue
 				}
-				l.Debug("------")
 				l.Debug(network.IntToIPv4(kData.Saddr).String())
 				v, err := m.GetValue(kPtr)
 				if err != nil {
@@ -108,18 +104,20 @@ func innerRun(ctx context.Context,
 					l.Sugar().Error("Error parseConnectionStats key ", err)
 					continue
 				}
-				l.Sugar().Debug("Total packets: ", s.Packets)
-				l.Sugar().Debug("Total Bytes: ", s.Bytes)
-				l.Debug("------")
+
 				var kernelKey [64]byte
 				copy(kernelKey[:], k)
-				ct.Store(tracker.ConnectionKey{Key: kData, KernelKey: kernelKey}, s)
+				ct.Store(kernelKey, tracker.Connection{
+					ConnectionStats: s,
+					Saddr:           network.IntToIPv4(kData.Saddr).String(),
+					Daddr:           network.IntToIPv4(kData.Daddr).String(),
+					Type:            network.IPV4,
+				})
 			}
 		}
 	}
 }
 
-// takes a BPF_MAP_TYPE_RINGBUF and grabs events from it
 func listenToEvents(rb *bpf.RingBuffer, eventsChannel chan []byte, done chan bool) int {
 	rb.Poll(300)
 	defer rb.Stop()
