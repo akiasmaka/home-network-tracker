@@ -25,8 +25,8 @@ type ConnectionTracker struct {
 }
 
 type ConnectionStats struct {
-	Bytes   uint64 `json:"bytes"`
 	Packets uint64 `json:"packets"`
+	Bytes   uint64 `json:"bytes"`
 }
 
 type Connection struct {

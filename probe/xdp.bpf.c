@@ -70,15 +70,17 @@ int xdp_count_type(struct xdp_md *ctx) {
 
         stats = bpf_map_lookup_elem(&ipv4_connection_tracker, &new_connection);
         if (stats == NULL) {
-            struct connection_stats new_stats = {0, 0};
+            uint64_t payload_size = ntohs(iph->tot_len) - sizeof(*iph);
+            struct connection_stats new_stats = {1, payload_size};
 
             bpf_printk("Got packet to a new connection with source %pI4 and destination %pI4",
                        &iph->saddr,
                        &iph->daddr);
-            //TODO: should be +1 packet and +size of packet
+            // TODO: should be +1 packet and +size of packet
             bpf_map_update_elem(&ipv4_connection_tracker, &new_connection, &new_stats, BPF_NOEXIST);
         } else {
-            (*stats).bytes += data_end - data;
+            uint64_t payload_size = ntohs(iph->tot_len) - sizeof(*iph);
+            (*stats).bytes += payload_size;
             (*stats).packets++;
 
             bpf_printk("Got packet to existing connection with source %pI4 and destination %pI4 this is packet number: %lu with a total %lu of bytes transferred",
@@ -102,7 +104,7 @@ int xdp_count_type(struct xdp_md *ctx) {
         struct connection_stats *stats;
         stats = bpf_map_lookup_elem(&ipv6_connection_tracker, &new_connection);
         if (stats == NULL) {
-            struct connection_stats new_stats = {0, 0};
+            struct connection_stats new_stats = {1, ntohs(ip6h->payload_len)};
 
             bpf_printk("Got packet to a new ipv6 connection with source %pI6 and destination %pI6",
                        &ip6h->saddr,
@@ -110,7 +112,7 @@ int xdp_count_type(struct xdp_md *ctx) {
 
             bpf_map_update_elem(&ipv6_connection_tracker, &new_connection, &new_stats, BPF_NOEXIST);
         } else {
-            (*stats).bytes += data_end - data;
+            (*stats).bytes += ntohs(ip6h->payload_len);
             (*stats).packets++;
 
             bpf_printk("Got packet to existing ipv6 connection with source %pI6 and destination %pI6 this is packet number: %lu with a total %lu of bytes transferred",
