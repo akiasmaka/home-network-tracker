@@ -76,7 +76,6 @@ int xdp_count_type(struct xdp_md *ctx) {
             bpf_printk("Got packet to a new connection with source %pI4 and destination %pI4",
                        &iph->saddr,
                        &iph->daddr);
-            // TODO: should be +1 packet and +size of packet
             bpf_map_update_elem(&ipv4_connection_tracker, &new_connection, &new_stats, BPF_NOEXIST);
         } else {
             uint64_t payload_size = ntohs(iph->tot_len) - sizeof(*iph);

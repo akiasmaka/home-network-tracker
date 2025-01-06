@@ -98,7 +98,6 @@ func innerRun(ctx context.Context,
 					continue
 				}
 
-				//TODO: move into the connetion tracker
 				s, err := tracker.ParseConnectionStats(v)
 				if err != nil {
 					l.Sugar().Error("Error parseConnectionStats key ", err)
