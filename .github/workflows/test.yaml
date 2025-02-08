@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Dump GitHub Event Payload
-      run: cat "$GITHUB_EVENT_PATH"
+        run: cat "$GITHUB_EVENT_PATH"
 
   update-title-on-checkbox:
     runs-on: ubuntu-latest
