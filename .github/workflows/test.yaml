@@ -24,12 +24,12 @@ jobs:
         run: |
           # For issue_comment events on a PR, the pull request number is in the "issue" object.
           pr_number=$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")
-          current_title=$(gh pr view $pr_number --json title -q ".title")
-          
+          current_title=$(gh pr view "$pr_number" --repo "${{ github.repository }}" --json title -q ".title")
+
           if [[ "$current_title" != test-123:* ]]; then
             new_title="test-123: $current_title"
             echo "Updating PR title to: $new_title"
-            gh pr edit $pr_number --title "$new_title"
+            gh pr edit "$pr_number" --repo "${{ github.repository }}" --title "$new_title"
           else
             echo "Title is already prefixed. No change needed."
           fi
