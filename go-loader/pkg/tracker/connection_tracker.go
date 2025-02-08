@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"net"
 	"sync"
 	"time"
 	"unsafe"
@@ -33,9 +34,11 @@ type ConnectionStats struct {
 
 type Connection struct {
 	ConnectionStats
-	Saddr string `json:"saddr"`
-	Daddr string `json:"addr"`
-	Type  int    `json:"type"`
+	Saddr string   `json:"saddr"`
+	Daddr string   `json:"addr"`
+	SHost []string `json:"sHost"`
+	DHost []string `json:"dHost"`
+	Type  int      `json:"type"`
 }
 
 type Entry struct {
@@ -83,10 +86,38 @@ func NewConnectionTracker(ctx context.Context,
 }
 
 func (m *ConnectionTracker) Store(k ConnectionKey, v Connection) {
-	m.Data.Store(k, Entry{
-		Connection:  v,
-		LastUpdated: time.Now().UnixMilli(),
-	})
+	if entry, ok := m.Data.Load(k); ok {
+		v.SHost = entry.(Entry).Connection.SHost
+		if v.SHost == nil {
+			v.SHost = []string{"nil"}
+		}
+		v.DHost = entry.(Entry).Connection.DHost
+		if v.DHost == nil {
+			v.DHost = []string{"nil"}
+		}
+
+		m.Data.Store(k, Entry{
+			Connection:  v,
+			LastUpdated: time.Now().UnixMilli(),
+		})
+	} else {
+		var err error
+		v.SHost, err = net.LookupAddr(v.Saddr)
+		if err != nil {
+			m.l.Sugar().Debugf("lookup for saddr %s failed with: %s", v.Saddr, err)
+			v.SHost = []string{"nil"}
+		}
+		v.DHost, err = net.LookupAddr(v.Daddr)
+		if err != nil {
+			m.l.Sugar().Debugf("lookup for daddr %s failed with: %s", v.Daddr, err)
+			v.DHost = []string{"nil"}
+		}
+
+		m.Data.Store(k, Entry{
+			Connection:  v,
+			LastUpdated: time.Now().UnixMilli(),
+		})
+	}
 }
 
 func (m *ConnectionTracker) Load(key ConnectionKey) (Connection, bool) {
@@ -96,6 +127,8 @@ func (m *ConnectionTracker) Load(key ConnectionKey) (Connection, bool) {
 	return Connection{}, false
 }
 
+// Not really needed anymore, I overestimated the amount of data that would be stored
+// TODO: Remove this at some point
 func (m *ConnectionTracker) removeOldestEntry() {
 	var oldestKey ConnectionKey
 	var oldestTimestamp int64 = time.Now().UnixMilli()

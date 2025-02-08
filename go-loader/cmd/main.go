@@ -61,8 +61,6 @@ func run() int {
 	jsonFile.Close()
 
 	ct.JsonFileToTrackerData(b)
-	ct.LogData()
-
 	ct.DataToKernelMap()
 
 	// Start the XDP program only after the map is "reconstructed"
