@@ -4,6 +4,9 @@ on:
   issue_comment:
     types: [edited]
 
+permissions:
+  issues: write
+
 jobs:
   debug:
     runs-on: ubuntu-latest
