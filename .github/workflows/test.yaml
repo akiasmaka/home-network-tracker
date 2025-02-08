@@ -27,14 +27,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-        identifier="test-123"
-        echo "Updating PR title with identifier: [$identifier]"
-        current_title=$(gh pr view ${{ github.event.pull_request.number }} --json title -q ".title")
+          identifier="test-123"
+          echo "Updating PR title with identifier: [$identifier]"
+          current_title=$(gh pr view ${{ github.event.pull_request.number }} --json title -q ".title")
 
-        if [[ "$current_title" != *$identifier* ]]; then
-          new_title="$identifier: $current_title"
-          echo "Changing PR title to: $new_title"
-          gh pr edit ${{ github.event.pull_request.number }} --title "$new_title"
-        else
-          echo "No change needed"
-        fi
+          if [[ "$current_title" != *$identifier* ]]; then
+            new_title="$identifier: $current_title"
+            echo "Changing PR title to: $new_title"
+            gh pr edit ${{ github.event.pull_request.number }} --title "$new_title"
+          else
+            echo "No change needed"
+          fi
