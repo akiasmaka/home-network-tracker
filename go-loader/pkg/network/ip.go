@@ -63,13 +63,35 @@ func AnyIpToString(ip any) string {
 	}
 }
 
-func GenericToIp(ip any) IPKey {
+func GenericToIp(ipKey IPKey) any {
+	switch ipKey.Type {
+	case IPV4:
+		return IPv4{
+			Saddr: binary.BigEndian.Uint32(net.ParseIP(ipKey.Saddr).To4()),
+			Daddr: binary.BigEndian.Uint32(net.ParseIP(ipKey.Daddr).To4()),
+		}
+	case IPV6:
+		var saddr, daddr In6Addr
+		copy(saddr.Addr[:], net.ParseIP(ipKey.Saddr).To16())
+		copy(daddr.Addr[:], net.ParseIP(ipKey.Daddr).To16())
+		return IPv6{
+			Saddr: saddr,
+			Daddr: daddr,
+		}
+	default:
+		return nil
+	}
+}
+
+func IpToKernelKey(ip any) [64]byte {
+	var key [64]byte
 	switch ip := ip.(type) {
 	case IPv4:
-		return IPKey{Type: IPV4, Saddr: IntToIPv4(ip.Saddr).String(), Daddr: IntToIPv4(ip.Daddr).String()}
+		binary.BigEndian.PutUint32(key[0:4], ip.Saddr)
+		binary.BigEndian.PutUint32(key[4:8], ip.Daddr)
 	case IPv6:
-		return IPKey{Type: IPV6, Saddr: net.IP(ip.Saddr.Addr[:]).String(), Daddr: net.IP(ip.Daddr.Addr[:]).String()}
-	default:
-		return IPKey{}
+		copy(key[0:16], ip.Saddr.Addr[:])
+		copy(key[16:32], ip.Daddr.Addr[:])
 	}
+	return key
 }

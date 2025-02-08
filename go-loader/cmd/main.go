@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -49,26 +50,40 @@ func run() int {
 	err = xpdRunner.LoadProgram("xdp_count_type")
 	checkIfErrorAndExit(err)
 
+	m, err := xpdRunner.GetMap("ipv4_connection_tracker")
+	checkIfErrorAndExit(err)
+
+	ct := tracker.NewConnectionTracker(ctx, 72*time.Hour, 24*time.Hour, m, l)
+
+	jsonFile, err := os.Open("data.json")
+	checkIfErrorAndExit(err)
+	b, _ := io.ReadAll(jsonFile)
+	jsonFile.Close()
+
+	ct.JsonFileToTrackerData(b)
+	ct.LogData()
+
+	ct.DataToKernelMap()
+
+	// Start the XDP program only after the map is "reconstructed"
 	xpdRunner.AttachProbe("xdp_count_type", "enp3s0", probeRunner.XDP)
 	checkIfErrorAndExit(err)
 	defer xpdRunner.Close()
 
-	m, err := xpdRunner.GetMap("ipv4_connection_tracker")
-	checkIfErrorAndExit(err)
-	innerRun(ctx, m, done, l)
+	innerRun(ctx, m, ct, done, l)
 
 	return 0
 }
 
 func innerRun(ctx context.Context,
 	m *bpf.BPFMap,
+	ct *tracker.ConnectionTracker,
 	done chan bool,
 	l *zap.Logger) {
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	ct := tracker.NewConnectionTracker(ctx, 72*time.Hour, 24*time.Hour, m, l)
 	server := output.Server{Addr: "", Port: 5000, Tracker: ct}
 	go server.Serve()
 
