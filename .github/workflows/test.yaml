@@ -18,23 +18,23 @@ jobs:
       contains(github.event.comment.body, '[x]') &&
       github.event.sender.login != 'github-actions[bot]'
     steps:
-      - name: Checkout the specified branch
-        uses: actions/checkout@v3
-        with:
-          ref: ${{ github.event.inputs.branch }}
-
       - name: Update PR title with test-123
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           identifier="test-123"
           echo "Updating PR title with identifier: [$identifier]"
-          current_title=$(gh pr view ${{ github.event.pull_request.number }} --json title -q ".title")
+
+          pr_number="${{ github.event.issue.number }}"
+          echo "Using PR number: $pr_number"
+
+          current_title=$(gh pr view "$pr_number" --repo "${{ github.repository }}" --json title -q ".title")
+          echo "Current title: $current_title"
 
           if [[ "$current_title" != *$identifier* ]]; then
             new_title="$identifier: $current_title"
             echo "Changing PR title to: $new_title"
-            gh pr edit ${{ github.event.pull_request.number }} --title "$new_title"
+            gh pr edit "$pr_number" --repo "${{ github.repository }}" --title "$new_title"
           else
-            echo "No change needed"
+            echo "Title already contains the identifier. No change needed."
           fi
