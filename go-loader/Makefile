@@ -3,11 +3,11 @@ BASEDIR = $(abspath ../)
 OUTPUT = ../build
 
 LIBBPF_OBJ = $(abspath $(OUTPUT)/libbpf/libbpf.a)
-LIBBPF_SRC = $(abspath ../libbpf/src)
+LIBBPF_SRC = $(abspath ../libbpf-bootstrap/libbpf/src)
 
 CC = clang
 CGO_CFLAGS = "-I$(abspath $(OUTPUT)) -I$(abspath ../build/libbpf)"
-CGO_LDFLAGS = "-lelf -lz $(LIBBPF_OBJ)"
+CGO_LDFLAGS = "-lelf -lz -ldw -lzstd $(LIBBPF_OBJ)"
 CGO_EXTLDFLAGS = '-w -extldflags "-static"'
 
 all: go-loader

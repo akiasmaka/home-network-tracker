@@ -7,6 +7,7 @@ build/CMakeCache.txt
 build/cmake_install.cmake
 build/Makefile
 build/compile_commands.json
+build/*.bpf.o
 
 #third party build outputs
 build/libbpf
@@ -21,3 +22,8 @@ build/go-cache
 
 go-loader/go-loader
 go-loader/vendor
+
+data.json
+.pnpm-store/
+history/history.*
+*.heapsnahsot

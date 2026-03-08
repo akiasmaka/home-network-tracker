@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
-	"net"
 	"sync"
 	"time"
-	"unsafe"
 
+	"github.com/akiasmaka/home-network-tracker/go-loader/pkg/containermeta"
 	"github.com/akiasmaka/home-network-tracker/go-loader/pkg/network"
+	"github.com/akiasmaka/home-network-tracker/go-loader/pkg/resolver"
 	bpf "github.com/aquasecurity/libbpfgo"
 	"go.uber.org/zap"
 )
@@ -23,8 +22,12 @@ type ConnectionTracker struct {
 	Data               UserSpaceMap
 	expirationDuration time.Duration
 	checkInterval      time.Duration
-	kernelMap          *bpf.BPFMap
+	kernelMapV4        *bpf.BPFMap
+	kernelMapV6        *bpf.BPFMap
 	l                  *zap.Logger
+	resolver           *resolver.Resolver
+	containerResolver  *containermeta.Resolver
+	ctx                context.Context
 }
 
 type ConnectionStats struct {
@@ -34,11 +37,17 @@ type ConnectionStats struct {
 
 type Connection struct {
 	ConnectionStats
-	Saddr string   `json:"saddr"`
-	Daddr string   `json:"addr"`
-	SHost []string `json:"sHost"`
-	DHost []string `json:"dHost"`
-	Type  int      `json:"type"`
+	Saddr     string                       `json:"saddr"`
+	Daddr     string                       `json:"addr"`
+	IfIndex   uint32                       `json:"ifindex"`
+	IfName    string                       `json:"ifname"`
+	CgroupID  uint64                       `json:"cgroupId"`
+	Direction uint8                        `json:"direction"`
+	Proto     uint8                        `json:"proto"`
+	SHost     []string                     `json:"sHost"`
+	DHost     []string                     `json:"dHost"`
+	Container *containermeta.ContainerInfo `json:"container,omitempty"`
+	Type      int                          `json:"type"`
 }
 
 type Entry struct {
@@ -48,7 +57,8 @@ type Entry struct {
 
 type ConnectionKey = [64]byte
 
-func (m *UserSpaceMap) ToSilce() []Connection {
+// ToSlice returns all tracked connections as a slice.
+func (m *UserSpaceMap) ToSlice() []Connection {
 	var conns []Connection
 	m.Range(func(key, value any) bool {
 		switch value.(type) {
@@ -62,6 +72,28 @@ func (m *UserSpaceMap) ToSilce() []Connection {
 	return conns
 }
 
+// Deprecated: Use ToSlice instead.
+func (m *UserSpaceMap) ToSilce() []Connection {
+	return m.ToSlice()
+}
+
+// ToEntries returns all tracked entries with their keys, preserving LastUpdated timestamps.
+func (m *UserSpaceMap) ToEntries() ([]Entry, []ConnectionKey) {
+	var entries []Entry
+	var keys []ConnectionKey
+	m.Range(func(key, value any) bool {
+		switch v := value.(type) {
+		case Entry:
+			entries = append(entries, v)
+			keys = append(keys, key.(ConnectionKey))
+		default:
+			return false
+		}
+		return true
+	})
+	return entries, keys
+}
+
 func ParseConnectionStats(stats []byte) (ConnectionStats, error) {
 	var d ConnectionStats
 	r := bytes.NewReader(stats)
@@ -72,14 +104,33 @@ func ParseConnectionStats(stats []byte) (ConnectionStats, error) {
 func NewConnectionTracker(ctx context.Context,
 	expirationDuration,
 	checkInterval time.Duration,
-	m *bpf.BPFMap,
+	mapV4 *bpf.BPFMap,
+	mapV6 *bpf.BPFMap,
+	ifaces []string,
+	dnsBpfPath string,
 	l *zap.Logger) *ConnectionTracker {
+	r := resolver.NewResolver(l)
+
+	// Start DNS sniffer BPF program to capture hostnames from DNS responses
+	if err := r.StartDNSSniffer(ctx, ifaces, dnsBpfPath); err != nil {
+		l.Warn("Failed to start DNS sniffer", zap.Error(err))
+	}
+
+	containerResolver, err := containermeta.NewResolver(ctx, l, 2*time.Minute)
+	if err != nil {
+		l.Warn("Failed to initialize Docker metadata resolver", zap.Error(err))
+	}
+
 	ct := &ConnectionTracker{
 		Data:               UserSpaceMap{},
 		expirationDuration: expirationDuration,
 		checkInterval:      checkInterval,
-		kernelMap:          m,
+		kernelMapV4:        mapV4,
+		kernelMapV6:        mapV6,
 		l:                  l,
+		resolver:           r,
+		containerResolver:  containerResolver,
+		ctx:                ctx,
 	}
 	go ct.Monitor(ctx)
 	return ct
@@ -87,14 +138,24 @@ func NewConnectionTracker(ctx context.Context,
 
 func (m *ConnectionTracker) Store(k ConnectionKey, v Connection) {
 	if entry, ok := m.Data.Load(k); ok {
-		v.SHost = entry.(Entry).Connection.SHost
+		existing := entry.(Entry).Connection
+		// Accumulate stats from the kernel delta into the running total.
+		v.Packets += existing.Packets
+		v.Bytes += existing.Bytes
+		v.SHost = existing.SHost
+		// can happen if the saved data has no SHost/DHost entry
 		if v.SHost == nil {
-			v.SHost = []string{"nil"}
+			v.SHost = []string{""}
 		}
-		v.DHost = entry.(Entry).Connection.DHost
+		v.DHost = existing.DHost
 		if v.DHost == nil {
-			v.DHost = []string{"nil"}
+			v.DHost = []string{""}
 		}
+		if v.Container == nil {
+			v.Container = existing.Container
+		}
+		m.enrichContainer(&v)
+		v.CgroupID = 0
 
 		m.Data.Store(k, Entry{
 			Connection:  v,
@@ -102,21 +163,41 @@ func (m *ConnectionTracker) Store(k ConnectionKey, v Connection) {
 		})
 	} else {
 		var err error
-		v.SHost, err = net.LookupAddr(v.Saddr)
+		v.SHost, err = m.resolver.LookupAddr(v.Saddr)
 		if err != nil {
-			m.l.Sugar().Debugf("lookup for saddr %s failed with: %s", v.Saddr, err)
-			v.SHost = []string{"nil"}
+			m.l.Sugar().Warnf("lookup for saddr %s failed with: %s", v.Saddr, err)
+			v.SHost = []string{""}
 		}
-		v.DHost, err = net.LookupAddr(v.Daddr)
+		v.DHost, err = m.resolver.LookupAddr(v.Daddr)
 		if err != nil {
-			m.l.Sugar().Debugf("lookup for daddr %s failed with: %s", v.Daddr, err)
-			v.DHost = []string{"nil"}
+			m.l.Sugar().Warnf("lookup for daddr %s failed with: %s", v.Daddr, err)
+			v.DHost = []string{""}
 		}
+		m.enrichContainer(&v)
+		v.CgroupID = 0
 
 		m.Data.Store(k, Entry{
 			Connection:  v,
 			LastUpdated: time.Now().UnixMilli(),
 		})
+	}
+}
+
+func (m *ConnectionTracker) enrichContainer(conn *Connection) {
+	if conn == nil || conn.Container != nil {
+		return
+	}
+	if m.containerResolver == nil || conn.CgroupID == 0 {
+		return
+	}
+	if info := m.containerResolver.LookupCgroupID(conn.CgroupID); info != nil {
+		conn.Container = info
+		return
+	}
+	if m.containerResolver.RefreshIfStale(m.ctx, 15*time.Second) {
+		if info := m.containerResolver.LookupCgroupID(conn.CgroupID); info != nil {
+			conn.Container = info
+		}
 	}
 }
 
@@ -127,23 +208,23 @@ func (m *ConnectionTracker) Load(key ConnectionKey) (Connection, bool) {
 	return Connection{}, false
 }
 
-// Not really needed anymore, I overestimated the amount of data that would be stored
-// TODO: Remove this at some point
-func (m *ConnectionTracker) removeOldestEntry() {
-	var oldestKey ConnectionKey
-	var oldestTimestamp int64 = time.Now().UnixMilli()
+func (m *ConnectionTracker) ContainerResolver() *containermeta.Resolver {
+	return m.containerResolver
+}
 
-	m.Data.Range(func(key, value any) bool {
-		entry := value.(Entry)
-		if entry.LastUpdated < oldestTimestamp {
-			oldestTimestamp = entry.LastUpdated
-			oldestKey = key.(ConnectionKey)
+func (m *ConnectionTracker) ResolveContainer(cgroupID uint64) *containermeta.ContainerInfo {
+	if m == nil || m.containerResolver == nil || cgroupID == 0 {
+		return nil
+	}
+	if info := m.containerResolver.LookupCgroupID(cgroupID); info != nil {
+		return info
+	}
+	if m.containerResolver.RefreshIfStale(m.ctx, 15*time.Second) {
+		if info := m.containerResolver.LookupCgroupID(cgroupID); info != nil {
+			return info
 		}
-		return true
-	})
-
-	m.Data.Delete(oldestKey)
-	m.l.Sugar().Info("Removed oldest entry with timestamp: ", oldestTimestamp)
+	}
+	return nil
 }
 
 func (m *ConnectionTracker) Monitor(ctx context.Context) {
@@ -157,7 +238,7 @@ func (m *ConnectionTracker) Monitor(ctx context.Context) {
 			m.Data.Range(func(key, value any) bool {
 				entry := value.(Entry)
 				if now >= entry.LastUpdated+m.expirationDuration.Milliseconds() {
-					m.OnExpire(key.(ConnectionKey))
+					m.OnExpire(key.(ConnectionKey), entry.Connection.Type)
 					m.Data.Delete(key)
 				}
 				return true
@@ -168,49 +249,46 @@ func (m *ConnectionTracker) Monitor(ctx context.Context) {
 	}
 }
 
-func (m *ConnectionTracker) OnExpire(key ConnectionKey) {
-	m.Data.Delete(key)
-	if m.kernelMap != nil {
-		k := key
-		kPtr := unsafe.Pointer(&k[0])
-		if err := m.kernelMap.DeleteKey(kPtr); err != nil {
-			m.l.Sugar().Errorf("Failed to delete %v due to %v", key, err)
-			panic("failed to delete")
+func (m *ConnectionTracker) OnExpire(key ConnectionKey, connType int) {
+	// Kernel map entries are deleted after read. Nothing to do here.
+	return
+}
+
+// SeedEntries loads pre-parsed entries (with preserved LastUpdated timestamps) into
+// the tracker's in-memory map. This avoids resetting TTL on restart.
+func (m *ConnectionTracker) SeedEntries(entries []Entry, keys []ConnectionKey) {
+	for i, entry := range entries {
+		conn := entry.Connection
+		if conn.Direction == network.DirectionUnknown {
+			conn.Direction = network.DirectionIngress
 		}
-	} else {
-		m.l.Sugar().Fatalf("Kernel map not set")
+		m.Data.Store(keys[i], Entry{
+			Connection:  conn,
+			LastUpdated: entry.LastUpdated,
+		})
 	}
 }
 
-func (m *ConnectionTracker) JsonFileToTrackerData(data []byte) {
-	var connections []Connection
-	if err := json.Unmarshal(data, &connections); err != nil {
-		m.l.Sugar().Errorf("Failed to unmarshal data %v", err)
-		panic("failed to unmarshal")
-	}
-
-	for _, conn := range connections {
-		ipKey := network.IPKey{Saddr: conn.Saddr, Daddr: conn.Daddr, Type: conn.Type}
+// SeedConnections loads pre-parsed connections into the tracker's in-memory map.
+// Note: LastUpdated is set to time.Now() — use SeedEntries to preserve timestamps.
+func (m *ConnectionTracker) SeedConnections(conns []Connection) {
+	for _, conn := range conns {
+		if conn.Direction == network.DirectionUnknown {
+			conn.Direction = network.DirectionIngress
+		}
+		ipKey := network.IPKey{
+			Saddr:     conn.Saddr,
+			Daddr:     conn.Daddr,
+			IfIndex:   conn.IfIndex,
+			CgroupID:  0,
+			Direction: conn.Direction,
+			Proto:     conn.Proto,
+			Type:      conn.Type,
+		}
 		x := network.GenericToIp(ipKey)
-		m.Store(network.IpToKernelKey(x), conn)
+		key := network.IpToKernelKey(x)
+		m.Store(key, conn)
 	}
-}
-
-func (m *ConnectionTracker) DataToKernelMap() {
-	m.Data.Range(func(key, value any) bool {
-		entry := value.(Entry)
-		k := key.(ConnectionKey)
-		kPtr := unsafe.Pointer(&k[0])
-		v := entry.Connection.ConnectionStats
-		vBytes := make([]byte, 16)
-		binary.LittleEndian.PutUint64(vBytes[:8], v.Packets)
-		binary.LittleEndian.PutUint64(vBytes[8:], v.Bytes)
-		if err := m.kernelMap.Update(kPtr, unsafe.Pointer(&vBytes[0])); err != nil {
-			m.l.Sugar().Errorf("Failed to update %v due to %v", key, err)
-			panic("failed to update")
-		}
-		return true
-	})
 }
 
 func (m *ConnectionTracker) LogData() {

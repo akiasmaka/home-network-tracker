@@ -11,7 +11,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../libbpf-bootstrap/to
 include(ExternalProject)
 ExternalProject_Add(libbpf
   PREFIX libbpf
-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../libbpf/src
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../libbpf-bootstrap/libbpf/src
   CONFIGURE_COMMAND ""
   BUILD_COMMAND make
     BUILD_STATIC_ONLY=1
@@ -29,7 +29,7 @@ ExternalProject_Add(libbpf
 # Build vendored bpftool
 ExternalProject_Add(bpftool
   PREFIX bpftool
-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../bpftool/src
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../libbpf-bootstrap/bpftool/src
   CONFIGURE_COMMAND ""
   BUILD_COMMAND make bootstrap
     OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bpftool/
@@ -39,7 +39,7 @@ ExternalProject_Add(bpftool
 )
 
 set(BPFOBJECT_BPFTOOL_EXE ${CMAKE_CURRENT_BINARY_DIR}/bpftool/bootstrap/bpftool)
-set(BPFOBJECT_VMLINUX_H ${CMAKE_CURRENT_SOURCE_DIR}/probe/vmlinux.h)
+set(BPFOBJECT_VMLINUX_H ${CMAKE_CURRENT_SOURCE_DIR}/vmlinux.h)
 set(LIBBPF_INCLUDE_DIRS ${CMAKE_CURRENT_BINARY_DIR}/libbpf)
 set(LIBBPF_LIBRARIES ${CMAKE_CURRENT_BINARY_DIR}/libbpf/libbpf.a)
 find_package(BpfObject REQUIRED)
@@ -55,3 +55,10 @@ add_dependencies(xdp_skel libbpf-build bpftool-build)
 
 add_executable(xdp xdp.c)
 target_link_libraries(xdp xdp_skel)
+
+bpf_object(dns_sniffer dns_sniffer.bpf.c)
+add_dependencies(dns_sniffer_skel libbpf-build bpftool-build)
+
+# Create a custom target to ensure dns_sniffer gets built
+add_custom_target(dns_sniffer ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/dns_sniffer.bpf.o)
+add_dependencies(dns_sniffer dns_sniffer_skel)

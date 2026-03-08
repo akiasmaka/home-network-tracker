@@ -1,23 +1,26 @@
-package probeRunnerdo_unlinkat
+package bpf
 
 import (
-	bpf "github.com/aquasecurity/libbpfgo"
+	"errors"
+
+	libbpf "github.com/aquasecurity/libbpfgo"
 )
 
 type probeType int
 
-const  (
+const (
 	KPROBE probeType = iota
 	XDP
 )
 
 type bpfModuleRunner struct {
-	module *bpf.Module
-	probes map[string]*bpf.BPFProg
+	module *libbpf.Module
+	probes map[string]*libbpf.BPFProg
+	links  []*libbpf.BPFLink
 }
 
 func NewRunner(bpfElfPath string) (*bpfModuleRunner, error) {
-	bpfModule, err := bpf.NewModuleFromFile(bpfElfPath)
+	bpfModule, err := libbpf.NewModuleFromFile(bpfElfPath)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +31,8 @@ func NewRunner(bpfElfPath string) (*bpfModuleRunner, error) {
 
 	return &bpfModuleRunner{
 		module: bpfModule,
-		probes: make(map[string]*bpf.BPFProg),
+		probes: make(map[string]*libbpf.BPFProg),
+		links:  make([]*libbpf.BPFLink, 0),
 	}, nil
 }
 
@@ -44,21 +48,37 @@ func (b *bpfModuleRunner) LoadProgram(programName string) error {
 func (b *bpfModuleRunner) AttachProbe(programName, attachment string, probeType probeType) error {
 	switch probeType {
 	case KPROBE:
-		_, err := b.probes[programName].AttachKprobe(attachment)
+		link, err := b.probes[programName].AttachKprobe(attachment)
 		if err != nil {
 			return err
 		}
+		b.links = append(b.links, link)
 	case XDP:
-		_, err := b.probes[programName].AttachXDP(attachment)
+		link, err := b.probes[programName].AttachXDP(attachment)
 		if err != nil {
 			return err
 		}
+		b.links = append(b.links, link)
 	}
 
 	return nil
 }
 
-func (b *bpfModuleRunner) AttachRingBuffer(ringBufferName string) (chan []byte, *bpf.RingBuffer, error) {
+func (b *bpfModuleRunner) AttachCgroup(programName, cgroupPath string) error {
+	prog, ok := b.probes[programName]
+	if !ok {
+		return errors.New("program not loaded")
+	}
+
+	link, err := prog.AttachCgroup(cgroupPath)
+	if err != nil {
+		return err
+	}
+	b.links = append(b.links, link)
+	return nil
+}
+
+func (b *bpfModuleRunner) AttachRingBuffer(ringBufferName string) (chan []byte, *libbpf.RingBuffer, error) {
 	eventsChannel := make(chan []byte)
 	rb, err := b.module.InitRingBuf(ringBufferName, eventsChannel)
 	if err != nil {
@@ -68,7 +88,7 @@ func (b *bpfModuleRunner) AttachRingBuffer(ringBufferName string) (chan []byte, 
 
 }
 
-func (b *bpfModuleRunner) GetMap(mapName string) (*bpf.BPFMap, error) {
+func (b *bpfModuleRunner) GetMap(mapName string) (*libbpf.BPFMap, error) {
 	bpfMap, err := b.module.GetMap(mapName)
 	if err != nil {
 		return nil, err
@@ -77,5 +97,8 @@ func (b *bpfModuleRunner) GetMap(mapName string) (*bpf.BPFMap, error) {
 }
 
 func (b *bpfModuleRunner) Close() {
+	for _, link := range b.links {
+		_ = link.Destroy()
+	}
 	b.module.Close()
 }
