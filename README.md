@@ -14,7 +14,7 @@ A network traffic monitor for personal servers built on eBPF. It attaches BPF pr
 ## Prerequisites
 
 - **Docker** — all build steps run inside Docker containers; no local toolchain required
-- **Linux host with cgroup v2** — required for the BPF cgroup hooks
+- **Linux host with cgroup v2** — required for the BPF cgroup hooksdaasdasdasdadasdasd
 - **Git submodules** — the build depends on vendored libbpf-bootstrap sources
 
 ## Building
